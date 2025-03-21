@@ -1,0 +1,7 @@
+server:
+  port: 8321
+spring:
+  ai:
+    openai:
+      api-key:
+      base-url: https://api.gptsapi.net
