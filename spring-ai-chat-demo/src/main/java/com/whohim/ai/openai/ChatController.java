@@ -1,5 +1,8 @@
 package com.whohim.ai.openai;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.whohim.ai.model.Book;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
@@ -10,6 +13,9 @@ import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.chat.prompt.PromptTemplate;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.Resource;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,6 +25,7 @@ import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 public class ChatController {
@@ -134,5 +141,78 @@ public class ChatController {
         // 将AI回复的消息放到历史消息列表中
         historyMessagePrompt.add(assistantMessage);
         return assistantMessage.getContent();
+    }
+
+
+    //    prompt 模板使用 demo
+
+    @Value("classpath:prompt.st")
+    private Resource templateResource;
+
+    @GetMapping("/template")
+    public String promptTemplate(String author) {
+        // 提示词
+        PromptTemplate promptTemplate = new PromptTemplate(templateResource);
+        // 动态地将author填充进去
+        Prompt prompt = promptTemplate.create(Map.of("author", author));
+
+        ChatResponse chatResponse = chatClient.prompt(prompt).call().chatResponse();
+
+        AssistantMessage assistantMessage = chatResponse.getResult().getOutput();
+        return assistantMessage.getContent();
+    }
+
+
+    // 实现代码生成器
+
+
+    @Value("classpath:code.st")
+    private Resource codeTemplate;
+
+    @GetMapping("/code")
+    public String generateCode(@RequestParam String description,
+                               @RequestParam String language,
+                               @RequestParam String methodName) {
+        PromptTemplate promptTemplate = new PromptTemplate(codeTemplate);
+        Prompt prompt = promptTemplate.create(
+                Map.of("description", description, "language", language, "methodName", methodName)
+        );
+        ChatResponse chatResponse = chatClient.prompt(prompt).call().chatResponse();
+        AssistantMessage assistantMessage = chatResponse.getResult().getOutput();
+        return assistantMessage.getContent();
+    }
+
+
+    // Jackson 解析器 demo
+
+    @GetMapping("/bean")
+    public Book getBookByAuthor(@RequestParam String author) {
+        final String template = """
+        请告诉我{author}最受欢迎的书是哪本？什么时间出版的？书的内容描述了什么？
+                请严格使用以下 JSON 格式回答，直接以纯文本输出，不要包含任何代码块标记（如 ```json 或 ```）：
+        {{
+          "title": "书名",
+          "publishDate": "yyyy-MM-dd",
+          "description": "内容描述"
+        }}
+        """;
+        // 构建 Prompt
+        PromptTemplate promptTemplate = new PromptTemplate(template);
+        Prompt prompt = promptTemplate.create(Map.of("author", author));
+
+        // 调用 AI 接口
+        ChatResponse chatResponse = chatClient.prompt(prompt).call().chatResponse();
+        AssistantMessage assistantMessage = chatResponse.getResult().getOutput();
+
+        String json = assistantMessage.getContent();
+        // 使用 Jackson 解析
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.registerModule(new JavaTimeModule());
+
+        try {
+            return mapper.readValue(json, Book.class);
+        } catch (Exception e) {
+            throw new RuntimeException("解析失败: " + json, e);
+        }
     }
 }
